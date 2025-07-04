@@ -1,201 +1,248 @@
 import sys
-import wget
-import os
-import random
-import hashlib
-import tempfile
-import subprocess
-import platform
-from random import choice
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
-    QMessageBox, QDialog, QGridLayout, QLineEdit, QStackedLayout
+
+# Импорт нужных классов из PyQt6
+from PyQt6.QtCore import QSize, Qt  # Размеры, флаги выравнивания
+from PyQt6.QtGui import QIcon, QAction, QColor, QPixmap, QPainter  # Иконки, цвета, изображение, рисование
+from PyQt6.QtWidgets import (  # Виджеты интерфейса
+  QApplication, QMainWindow, QLabel,
+  QGraphicsColorizeEffect, QToolBar, QSlider, QPushButton, QColorDialog
 )
-from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtCore import Qt
 
 
-def open_file(path):
-    """Кроссплатформенное открытие файлов."""
-    if platform.system() == "Windows":
-        os.startfile(path)
-    elif platform.system() == "Darwin":  # macOS
-        subprocess.run(["open", path])
-    else:  # Linux
-        subprocess.run(["xdg-open", path])
-
-
-color_list = ['Indigo', 'SlateBlue', 'DarkSlateBlue', 'DarkMagenta', 'Cornsilk',
-              'RosyBrown', 'Chocolate', 'Gray', 'Maroon', 'Teal', 'MediumSlateBlue', 'PowderBlue',
-              'ForestGreen', 'LawnGreen', 'Linen', 'DarkSlateGray', 'LightYellow', 'LightSalmon',
-              'GreenYellow', 'SeaGreen', 'Khaki', 'Fuchsia', 'PeachPuff', 'OliveDrab']
-
-
-class HashSelectionDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QGridLayout()
-        algorithms = ["MD5", "SHA256", "SHA512", "SHA1"]
-        for i, algo in enumerate(algorithms):
-            btn = QPushButton(algo)
-            btn.clicked.connect(lambda _, a=algo.lower(): self.select_algorithm(a))
-            layout.addWidget(btn, i // 2, i % 2)
-        self.setLayout(layout)
-
-    def select_algorithm(self, algorithm):
-        self.algorithm_selected = algorithm
-        self.accept()
-
-
-class MainWindow(QWidget):
+# Класс холста, где мы будем рисовать
+class Canvas(QLabel):
     def __init__(self):
         super().__init__()
-        self.initUI()
+        # Создаем изображение размером 800x600 пикселей
+        pixmap = QPixmap(800, 600)
+        # Заполняем его белым цветом
+        pixmap.fill(Qt.GlobalColor.white)
+        # Назначаем изображение этому QLabel
+        self.setPixmap(pixmap)
+        # Устанавливаем фиксированный размер, чтобы QLabel не сжимался
+        self.setFixedSize(pixmap.size())
 
-    def initUI(self):
-        self.setFixedSize(850, 500)
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Window, QColor('NavajoWhite'))
-        self.setPalette(palette)
-        self.setAutoFillBackground(True)
+        # Последние координаты мыши (для рисования линии)
+        self.last_x, self.last_y = None, None
+        # Цвет кисти (по умолчанию черный)
+        self.pen_color = QColor("#000000")
+        # Толщина линии
+        self.pen_size = 4
 
-        main_layout = QVBoxLayout(self)
+    # Обработка движения мыши по холсту
+    def mouseMoveEvent(self, e):
+        # Если это первое движение — просто запоминаем точку
+        if self.last_x is None:
+            self.last_x = e.position().x()
+            self.last_y = e.position().y()
+            return
 
-        # Кнопки сверху
-        button_layout = QHBoxLayout()
-        self.buttons = []
-        for name, method in [("Изменение цвета", self.show_home),
-                             ("Установщики", self.show_installers),
-                             ("Хеширование", self.show_hashing),
-                             ("Рандомайзер", self.show_randomizer)]:
-            btn = QPushButton(name)
-            btn.setStyleSheet(self.button_style())
-            btn.clicked.connect(method)
-            self.buttons.append(btn)
-            button_layout.addWidget(btn)
+        # Получаем текущее изображение
+        canvas = self.pixmap()
+        # Создаем рисовальщика
+        painter = QPainter(canvas)
+        # Включаем сглаживание линий
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        main_layout.addLayout(button_layout)
+        # Настраиваем кисть
+        pen = painter.pen()
+        pen.setWidth(self.pen_size)
+        pen.setColor(self.pen_color)
+        painter.setPen(pen)
 
-        # Стек страниц
-        self.stack = QStackedLayout()
-        main_layout.addLayout(self.stack)
+        # Рисуем линию от предыдущей точки до текущей
+        painter.drawLine(int(self.last_x), int(self.last_y), int(e.position().x()), int(e.position().y()))
+        # Завершаем рисование
+        painter.end()
 
-        # Главная страница
-        self.page_home = QLabel("Привет, " + os.getlogin())
-        self.page_home.setStyleSheet('font-size: 20px')
-        self.page_home.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stack.addWidget(self.page_home)
+        # Обновляем изображение на холсте
+        self.setPixmap(canvas)
 
-        # Плейсхолдеры для других страниц
-        self.page_installers = QWidget()
-        self.page_hashing = QWidget()
-        self.page_randomizer = QWidget()
+        # Обновляем координаты
+        self.last_x = e.position().x()
+        self.last_y = e.position().y()
 
-        self.show_home()
+    # Когда отпускаем мышь — сбрасываем координаты
+    def mouseReleaseEvent(self, e):
+        self.last_x = None
+        self.last_y = None
 
-    def button_style(self):
-        return ('background-color: BurlyWood; font-size: 16px; padding: 10px; border-radius: 5px;')
+# Главное окно приложения
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
 
-    def show_home(self):
-        bg_color = choice(color_list)
-        palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(bg_color))
-        self.setPalette(palette)
-        self.page_home.setText(f"Цвет фона изменился на {bg_color}")
-        self.stack.setCurrentWidget(self.page_home)
+        # Название окна
+        self.setWindowTitle("Picasso")
+        # Размер окна
+        self.setFixedSize(QSize(800, 600))
 
-    def show_installers(self):
-        layout = QVBoxLayout()
-        items = [("Anydesk", self.download_anydesk), ("Chrome", self.download_chrome)]
-        for name, func in items:
-            hlayout = QHBoxLayout()
-            label = QLabel(name)
-            label.setStyleSheet('font-size: 20px')
-            btn = QPushButton('Скачать и открыть')
-            btn.setStyleSheet(self.button_style())
-            btn.clicked.connect(func)
-            hlayout.addWidget(label)
-            hlayout.addWidget(btn)
-            layout.addLayout(hlayout)
+        # --- Меню ---
 
-        self.page_installers.setLayout(layout)
-        if self.stack.indexOf(self.page_installers) == -1:
-            self.stack.addWidget(self.page_installers)
-        self.stack.setCurrentWidget(self.page_installers)
+        # Создаем меню
+        main_menu = self.menuBar()
+        file_menu = main_menu.addMenu("Файл")
 
-    def download_anydesk(self):
-        url = "https://github.com/zxcsovamb/m9snoi/raw/refs/heads/main/anydesk.exe"
-        output_path = os.path.join(tempfile.gettempdir(), "anydesk.exe")
-        self.download_and_open(url, output_path, "Anydesk")
+        # Создаем действия с иконками
+        new_img_action = QAction(QIcon("icons/new-image.png"), "Создать", self)
+        open_action = QAction(QIcon("icons/open-image.png"), "Открыть", self)
+        save_action = QAction(QIcon("icons/save-image.png"), "Сохранить", self)
 
-    def download_chrome(self):
-        url = "https://github.com/zxcsovamb/midnight/raw/refs/heads/main/ChromeSetup.exe"
-        output_path = os.path.join(tempfile.gettempdir(), "ChromeSetup.exe")
-        self.download_and_open(url, output_path, "Chrome")
+        # Добавляем действия в меню
+        file_menu.addAction(new_img_action)
+        file_menu.addAction(open_action)
+        file_menu.addAction(save_action)
 
-    def download_and_open(self, url, output_path, name):
-        try:
-            wget.download(url, out=output_path)
-            open_file(output_path)
-            QMessageBox.information(self, "Успех", f"{name} успешно загружен и открыт!")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", str(e))
+        # --- Холст ---
 
-    def show_hashing(self):
-        layout = QVBoxLayout()
-        input_field = QLineEdit()
-        input_field.setPlaceholderText("Введите строку для хэширования...")
-        input_field.setStyleSheet('font-size: 16px; padding: 10px; border-radius: 5px; background-color: WhiteSmoke;')
-        submit_button = QPushButton("Выбрать алгоритм")
-        submit_button.setStyleSheet(self.button_style())
-        submit_button.clicked.connect(lambda: self.open_hash_selection(input_field.text()))
+        # Создаем объект холста и делаем его центральным виджетом
+        self.canvas = Canvas()
+        self.setCentralWidget(self.canvas)
 
-        layout.addWidget(input_field)
-        layout.addWidget(submit_button)
-        self.page_hashing.setLayout(layout)
-        if self.stack.indexOf(self.page_hashing) == -1:
-            self.stack.addWidget(self.page_hashing)
-        self.stack.setCurrentWidget(self.page_hashing)
+        # --- Обработка пунктов меню ---
 
-    def open_hash_selection(self, data_to_hash):
-        dialog = HashSelectionDialog(self)
-        result = dialog.exec()
-        if result == QDialog.DialogCode.Accepted and hasattr(dialog, 'algorithm_selected'):
-            self.calculate_hash(data_to_hash, dialog.algorithm_selected)
+        # При нажатии выполняются методы
+        new_img_action.triggered.connect(self.new_img_text)
+        open_action.triggered.connect(self.open_img_text)
+        save_action.triggered.connect(self.save_img_text)
 
-    def calculate_hash(self, data, algorithm):
-        try:
-            hash_funcs = {
-                "md5": hashlib.md5,
-                "sha256": hashlib.sha256,
-                "sha512": hashlib.sha512,
-                "sha1": hashlib.sha1
+        # Создаем панели инструментов
+        self.create_toolbars()
+
+    # Метод создания тулбаров
+    def create_toolbars(self):
+        # --- Панель "Файл" ---
+        self.fileToolbar = QToolBar(self)
+        self.fileToolbar.setIconSize(QSize(16, 16))
+        self.fileToolbar.setObjectName("fileToolbar")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.fileToolbar)
+
+        # Кнопка "Создать"
+        new_img_button = QPushButton()
+        new_img_button.setIcon(QIcon("icons/new-image.png"))
+        self.fileToolbar.addWidget(new_img_button)
+
+        # Кнопка "Открыть"
+        open_img_button = QPushButton()
+        open_img_button.setIcon(QIcon("icons/open-image.png"))
+        self.fileToolbar.addWidget(open_img_button)
+
+        # Кнопка "Сохранить"
+        save_img_button = QPushButton()
+        save_img_button.setIcon(QIcon("icons/save-image.png"))
+        self.fileToolbar.addWidget(save_img_button)
+
+        # --- Панель "Слайдер" для толщины линии ---
+        self.sliderToolbar = QToolBar(self)
+        self.sliderToolbar.setIconSize(QSize(16, 16))
+        self.sliderToolbar.setObjectName("sliderToolbar")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.sliderToolbar)
+
+        # Иконка перед слайдером
+        sizeicon = QLabel()
+        sizeicon.setPixmap(QPixmap("icons/border-weight.png").scaled(
+            16, 16,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        ))
+        self.sliderToolbar.addWidget(sizeicon)
+
+        # Слайдер для настройки толщины линии
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(10, 30)
+        self.slider.setValue(25)
+        self.slider.valueChanged.connect(self.change_pen_size) 
+        self.sliderToolbar.addWidget(self.slider)
+
+        # --- Панель "Рисование" ---
+        self.drawingToolbar = QToolBar(self)
+        self.drawingToolbar.setIconSize(QSize(16, 16))
+        self.drawingToolbar.setObjectName("drawingToolbar")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.drawingToolbar)
+
+        # Кнопка "Карандаш"
+        brush_button = QPushButton()
+        brush_button.setIcon(QIcon("icons/paint-brush.png"))
+        brush_button.setCheckable(True)
+        self.drawingToolbar.addWidget(brush_button)
+
+        # Кнопка "Заливка"
+        can_button = QPushButton()
+        can_button.setIcon(QIcon("icons/paint-can.png"))
+        can_button.setCheckable(True)
+        self.drawingToolbar.addWidget(can_button)
+
+        # Кнопка "Ластик"
+        eraser_button = QPushButton()
+        eraser_button.setIcon(QIcon("icons/eraser.png"))
+        eraser_button.setCheckable(True)
+        self.drawingToolbar.addWidget(eraser_button)
+
+        # Кнопка "Пипетка"
+        picker_button = QPushButton()
+        picker_button.setIcon(QIcon("icons/pipette.png"))
+        picker_button.setCheckable(True)
+        self.drawingToolbar.addWidget(picker_button)
+ 
+        # --- Нижняя панель для выбора цвета ---
+        self.bottomToolbar = QToolBar(self)
+        self.bottomToolbar.setIconSize(QSize(16, 16))
+        self.bottomToolbar.setObjectName("bottomToolbar")
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.bottomToolbar)
+
+        # Кнопка "Цвет" с иконкой и текстом
+        self.color_button = QPushButton("Цвет")  # Кнопка с текстом
+        self.color_button.setIcon(QIcon("icons/colors.png"))  # Иконка 
+        self.color_button.setIconSize(QSize(20, 20))  # Размер иконки
+        self.color_button.setMinimumHeight(36)  # Высота кнопки
+        self.color_button.setStyleSheet("""  # Простой стиль
+            QPushButton {
+                padding: 5px 10px;
+                font-size: 14px;
             }
-            hashed_data = hash_funcs[algorithm](data.encode()).hexdigest()
-            QApplication.clipboard().setText(hashed_data)
-            QMessageBox.information(self, "Результат хэширования",
-                                    f"Алгоритм: {algorithm.upper()} \n\n"
-                                    f"Хэш:\n{hashed_data} \n\n"
-                                    f"Скопировано в буфер обмена!")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", str(e))
+        """)
+        self.color_button.clicked.connect(self.choose_color)  # Выбор цвета по нажатию
+        self.bottomToolbar.addWidget(self.color_button)
 
-    def show_randomizer(self):
-        number = str(random.randint(1, 9999999999))
-        dlg = QMessageBox(self)
-        dlg.setWindowTitle("Рандомайзер")
-        dlg.setText(f"Число: {number} Скопировать?")
-        dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        dlg.setIcon(QMessageBox.Icon.Question)
-        button = dlg.exec()
+    # Добавление кнопки с иконкой в тулбар (без текста)
+    def add_toolbar_button(self, toolbar, icon_path):
+        button = QPushButton()
+        button.setIcon(QIcon(icon_path))
+        toolbar.addWidget(button)
 
-        if button == QMessageBox.StandardButton.Yes:
-            QApplication.clipboard().setText(number)
-            QMessageBox.information(self, "Окно", "Успешно!")
+    def change_pen_size(self, value):
+        self.canvas.pen_size = value  # Устанавливаем толщину линии для кисти
+
+    # Цветовой эффект на старый label (не используется с Canvas)
+    def change_color(self, color_name):
+        color_effect = QGraphicsColorizeEffect()
+        color_effect.setColor(QColor(color_name))
+        self.label.setGraphicsEffect(color_effect)
+
+    # Реакция на пункт меню "Создать"
+    def new_img_text(self):
+        self.label.setText("НОВОЕ ИЗОБРАЖЕНИЕ")
+        self.change_color("green")
+
+    # Реакция на пункт меню "Открыть"
+    def open_img_text(self):
+        self.label.setText("ОТКРЫТЬ ИЗОБРАЖЕНИЕ")
+        self.change_color("blue")
+
+    # Реакция на пункт меню "Сохранить"
+    def save_img_text(self):
+        self.label.setText("СОХРАНИТЬ ИЗОБРАЖЕНИЕ")
+        self.change_color("red")
+
+    # Метод выбора цвета с помощью диалога
+    def choose_color(self):
+        color = QColorDialog.getColor()  # Открываем диалог выбора цвета
+        if color.isValid():  # Если цвет выбран (не отмена)
+            self.canvas.pen_color = color  # Применяем к кисти
 
 
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+# Запуск приложения
+app = QApplication(sys.argv)  # Создаем приложение
+window = MainWindow()         # Создаем главное окно
+window.show()                 # Показываем окно пользователю
+app.exec()                    # Запускаем цикл событий
